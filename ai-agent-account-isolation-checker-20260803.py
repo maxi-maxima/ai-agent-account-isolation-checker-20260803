@@ -71,25 +71,62 @@ def scan_roots(roots, min_entropy):
                     })
                 else:
                     seen[sha] = item
+    remediations = []
+    for finding in findings:
+        remediations.append({
+            'action': 'rotate-or-isolate-duplicate-secret',
+            'duplicate': finding['duplicate'],
+            'first': finding['first'],
+            'reason': 'same credential-like file content appears in multiple profile roots',
+        })
     return {
         'credential_like_files': len(files),
         'shared_secret_file_count': len(findings),
         'high_entropy_file_count': sum(1 for item in files if item['high_entropy']),
         'duplicates': findings,
+        'remediations': remediations,
         'files': files,
     }
+
+
+def render_remediation(out):
+    lines = [
+        '# Account isolation remediation plan',
+        '',
+        'Review each duplicate before changing files. Rotate exposed credentials before deleting local copies.',
+    ]
+    if not out['remediations']:
+        lines.append('')
+        lines.append('No duplicate credential-like files were found.')
+        return '\n'.join(lines)
+    for i, item in enumerate(out['remediations'], 1):
+        lines.extend([
+            '',
+            f"## {i}. {item['action']}",
+            f"- duplicate: {item['duplicate']}",
+            f"- first_seen: {item['first']}",
+            f"- reason: {item['reason']}",
+            '- suggested_steps:',
+            '  1. Confirm which profile should own this credential.',
+            '  2. Rotate the credential with the provider if it may have crossed account boundaries.',
+            '  3. Remove or replace the duplicate file after backup and re-run this checker.',
+        ])
+    return '\n'.join(lines)
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description='Find shared credential-looking files across local AI agent account profiles.')
     ap.add_argument('roots', nargs='+')
     ap.add_argument('--json', action='store_true')
+    ap.add_argument('--remediation', action='store_true', help='Emit a reviewable remediation plan for duplicate credential files')
     ap.add_argument('--min-entropy', type=float, default=4.0, help='Bits-per-byte threshold for high-entropy credential candidates')
     ns = ap.parse_args(argv)
 
     out = scan_roots(ns.roots, ns.min_entropy)
     if ns.json:
         print(json.dumps(out, indent=2))
+    elif ns.remediation:
+        print(render_remediation(out))
     else:
         print(
             f"shared_secret_file_count={out['shared_secret_file_count']} "
